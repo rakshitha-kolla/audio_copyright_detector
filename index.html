@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audio Copyright Detector</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">🎵 Audio Copyright Detector</div>
+            <p class="tagline">Identify copyrighted music in seconds</p>
+        </header>
+
+        <div class="main-content">
+            <!-- File Input Card -->
+            <div class="card">
+                <h2>
+                    <div class="card-icon">📁</div>
+                    Select Audio File
+                </h2>
+                <form id="fileForm">
+                    <div class="upload-zone" id="uploadZone">
+                        <p style="font-size: 32px; margin-bottom: 10px;">↓</p>
+                        <p><strong>Drag & Drop</strong> your audio file here</p>
+                        <p style="font-size: 12px; margin-top: 10px;">or click to browse</p>
+                        <input 
+                            type="file" 
+                            id="fileInput" 
+                            accept="audio/*"
+                            required
+                        >
+                        <div class="file-name" id="fileName"></div>
+                    </div>
+                </form>
+            </div>
+
+            <!-- API Configuration Card -->
+            <div class="card">
+                <h2>
+                    <div class="card-icon">⚙️</div>
+                    API Configuration
+                </h2>
+                <div class="input-group">
+                    <label>API Endpoint</label>
+                    <input 
+                        type="text" 
+                        id="apiEndpoint" 
+                        value="http://localhost:8000"
+                        placeholder="http://localhost:8000"
+                    >
+                </div>
+                <div class="input-group">
+                    <label>API Status</label>
+                    <button 
+                        type="button" 
+                        class="btn-secondary" 
+                        onclick="checkHealth()"
+                        style="width: 100%; margin-top: 10px;"
+                    >
+                        Check Health
+                    </button>
+                </div>
+                <div id="healthStatus"></div>
+            </div>
+        </div>
+
+        <!-- Buttons -->
+        <div style="display: flex; gap: 12px; margin-bottom: 40px;">
+            <button class="btn-primary" onclick="detectCopyright()" style="flex: 1;">
+                🔍 Detect Copyright
+            </button>
+            <button class="btn-secondary" onclick="resetForm()" style="flex: 1;">
+                🔄 Reset
+            </button>
+        </div>
+
+        <!-- Results Section -->
+        <div class="results-container">
+            <div class="results-header">Detection Results</div>
+            <div id="results">
+                <div class="empty-state">
+                    <div class="empty-state-icon">🎧</div>
+                    <p>Select an audio file and click "Detect Copyright" to begin</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Stats Section -->
+        <div class="stats-grid" id="statsGrid" style="display: none; margin-top: 40px;">
+            <div class="stat-card">
+                <h3 id="statFiles">0</h3>
+                <p>Files Processed</p>
+            </div>
+            <div class="stat-card">
+                <h3 id="statMatches">0</h3>
+                <p>Matches Found</p>
+            </div>
+            <div class="stat-card">
+                <h3 id="statScore">0%</h3>
+                <p>Avg Confidence</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // State
+        let selectedFile = null;
+        let stats = {
+            filesProcessed: 0,
+            matchesFound: 0,
+            totalScore: 0
+        };
+
+        // Upload Zone Event Listeners
+        const uploadZone = document.getElementById('uploadZone');
+        const fileInput = document.getElementById('fileInput');
+
+        uploadZone.addEventListener('click', () => fileInput.click());
+
+        uploadZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadZone.classList.add('dragover');
+        });
+
+        uploadZone.addEventListener('dragleave', () => {
+            uploadZone.classList.remove('dragover');
+        });
+
+        uploadZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadZone.classList.remove('dragover');
+            handleFileSelect(e.dataTransfer.files[0]);
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            handleFileSelect(e.target.files[0]);
+        });
+
+        function handleFileSelect(file) {
+            if (!file) return;
+
+            const validFormats = ['audio/mpeg', 'audio/wav', 'audio/flac', 'audio/ogg', 'audio/aac', 'audio/x-m4a'];
+            if (!validFormats.includes(file.type)) {
+                showAlert('Invalid file format. Please select an audio file.', 'error');
+                return;
+            }
+
+            selectedFile = file;
+            document.getElementById('fileName').textContent = `✓ ${file.name}`;
+        }
+
+        async function checkHealth() {
+            const endpoint = document.getElementById('apiEndpoint').value;
+            try {
+                const response = await fetch(`${endpoint}/health`);
+                const data = await response.json();
+                
+                const statusDiv = document.getElementById('healthStatus');
+                if (response.ok) {
+                    statusDiv.innerHTML = `
+                        <div class="alert alert-success">
+                            ✓ API is healthy
+                        </div>
+                    `;
+                } else {
+                    statusDiv.innerHTML = `
+                        <div class="alert alert-error">
+                            ✗ API error: ${data.detail || 'Unknown error'}
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                document.getElementById('healthStatus').innerHTML = `
+                    <div class="alert alert-error">
+                        ✗ Cannot connect to API: ${error.message}
+                    </div>
+                `;
+            }
+        }
+
+        async function detectCopyright() {
+            if (!selectedFile) {
+                showAlert('Please select an audio file first', 'error');
+                return;
+            }
+
+            const endpoint = document.getElementById('apiEndpoint').value;
+            const resultsDiv = document.getElementById('results');
+            
+            // Show loading state
+            resultsDiv.innerHTML = `
+                <div class="alert alert-warning">
+                    <div class="loading-spinner"></div>
+                    <span>Analyzing audio file... This may take a moment</span>
+                </div>
+            `;
+
+            try {
+                // Upload file to temporary location and detect
+                const formData = new FormData();
+                formData.append('file', selectedFile);
+
+                // Note: This uses the file from disk, so we'll use the detect endpoint with filename
+                const filename = selectedFile.name;
+                const response = await fetch(`${endpoint}/detect/${filename}`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    displayResults(data);
+                    updateStats(data);
+                    showAlert(`Successfully detected copyright in ${filename}`, 'success');
+                } else {
+                    showAlert(`Error: ${data.detail || 'Unknown error'}`, 'error');
+                    resultsDiv.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-state-icon">❌</div>
+                            <p>${data.detail || 'An error occurred'}</p>
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                showAlert(`Failed to connect to API: ${error.message}`, 'error');
+                resultsDiv.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">❌</div>
+                        <p>Cannot connect to API endpoint</p>
+                        <p style="font-size: 12px; margin-top: 10px;">${error.message}</p>
+                    </div>
+                `;
+            }
+        }
+
+        function displayResults(data) {
+            const resultsDiv = document.getElementById('results');
+            let html = '';
+
+            if (data.status === 'found') {
+                const topMatch = data.top_match;
+                html += `
+                    <div class="status-badge status-found">
+                        ✓ Match Found
+                    </div>
+                `;
+
+                if (topMatch) {
+                    html += `
+                        <div class="match-result">
+                            <div class="match-title">${topMatch.title || 'Unknown Title'}</div>
+                            <div class="match-artist">${topMatch.artist || 'Unknown Artist'}</div>
+                            <div class="match-stats">
+                                <div class="stat">
+                                    <span class="stat-label">Confidence</span>
+                                    <span class="confidence-badge confidence-${topMatch.confidence}">
+                                        ${topMatch.confidence}
+                                    </span>
+                                </div>
+                                <div class="stat">
+                                    <span class="stat-label">Match Score</span>
+                                    <span class="stat-value">${(topMatch.match_score * 100).toFixed(0)}%</span>
+                                </div>
+                                <div class="stat">
+                                    <span class="stat-label">Recording ID</span>
+                                    <span class="stat-value">${topMatch.recording_id.substring(0, 12)}...</span>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }
+
+                if (data.matches && data.matches.length > 1) {
+                    html += `
+                        <div style="margin-top: 20px;">
+                            <h3 style="font-size: 14px; margin-bottom: 12px; color: var(--text-secondary);">
+                                Other Matches (${data.matches.length - 1})
+                            </h3>
+                    `;
+                    data.matches.slice(1, 3).forEach(match => {
+                        html += `
+                            <div class="match-result" style="border-left-color: var(--text-secondary);">
+                                <div class="match-title" style="font-size: 14px;">${match.title || 'Unknown'}</div>
+                                <div class="match-artist" style="font-size: 12px;">${match.artist || 'Unknown'}</div>
+                                <div class="stat" style="margin-top: 8px;">
+                                    <span class="stat-label">Match: ${(match.match_score * 100).toFixed(0)}%</span>
+                                    <span class="confidence-badge confidence-${match.confidence}">
+                                        ${match.confidence}
+                                    </span>
+                                </div>
+                            </div>
+                        `;
+                    });
+                    html += `</div>`;
+                }
+
+                if (data.saved_to) {
+                    html += `
+                        <div style="margin-top: 20px; padding: 12px; background: rgba(0, 102, 255, 0.1); border-radius: 8px; border: 1px solid var(--primary);">
+                            <p style="font-size: 12px; color: var(--text-secondary);">📁 Result saved to:</p>
+                            <p style="font-size: 11px; color: var(--primary); word-break: break-all; margin-top: 4px;">${data.saved_to}</p>
+                        </div>
+                    `;
+                }
+            } else if (data.status === 'not_found') {
+                html = `
+                    <div class="status-badge status-not-found">
+                        ⚠ No Match Found
+                    </div>
+                    <div class="empty-state" style="padding: 0;">
+                        <p>This audio file was not found in the AcoustID database.</p>
+                        <p style="font-size: 12px; margin-top: 10px; color: var(--text-secondary);">
+                            Try with a popular or well-known song to test the feature.
+                        </p>
+                    </div>
+                `;
+            } else if (data.status === 'error') {
+                html = `
+                    <div class="status-badge status-error">
+                        ✗ Error
+                    </div>
+                    <div class="empty-state" style="padding: 0;">
+                        <p>${data.error}</p>
+                    </div>
+                `;
+            }
+
+            resultsDiv.innerHTML = html;
+        }
+
+        function updateStats(data) {
+            stats.filesProcessed++;
+            if (data.status === 'found' && data.top_match) {
+                stats.matchesFound++;
+                stats.totalScore += data.top_match.match_score * 100;
+            }
+
+            document.getElementById('statFiles').textContent = stats.filesProcessed;
+            document.getElementById('statMatches').textContent = stats.matchesFound;
+            document.getElementById('statScore').textContent = 
+                stats.matchesFound > 0 
+                    ? Math.round(stats.totalScore / stats.matchesFound) + '%'
+                    : '0%';
+            
+            document.getElementById('statsGrid').style.display = 'grid';
+        }
+
+        function resetForm() {
+            selectedFile = null;
+            fileInput.value = '';
+            document.getElementById('fileName').textContent = '';
+            document.getElementById('results').innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-state-icon">🎧</div>
+                    <p>Select an audio file and click "Detect Copyright" to begin</p>
+                </div>
+            `;
+            document.getElementById('healthStatus').innerHTML = '';
+        }
+
+        function showAlert(message, type) {
+            const alertClass = `alert alert-${type}`;
+            const icon = type === 'success' ? '✓' : type === 'error' ? '✗' : '⚠';
+            
+            // You could show this in a toast or modal, for now we'll use console
+            console.log(`[${type.toUpperCase()}] ${message}`);
+        }
+
+        // Auto-check health on page load
+        window.addEventListener('load', () => {
+            checkHealth();
+        });
+    </script>
+</body>
+</html>
