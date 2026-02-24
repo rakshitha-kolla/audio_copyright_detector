@@ -204,7 +204,7 @@
 
                 // Note: This uses the file from disk, so we'll use the detect endpoint with filename
                 const filename = selectedFile.name;
-                const response = await fetch(`${endpoint}/detect/${filename}`, {
+                const response = await fetch(`${endpoint}/detect-upload`, {
                     method: 'POST',
                     body: formData
                 });
