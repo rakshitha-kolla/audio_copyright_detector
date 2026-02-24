@@ -2,3 +2,4 @@ pyacoustid
 pydub
 fastapi
 uvicorn
+python-dotenv
